@@ -8,6 +8,8 @@ Built binary represents end device with power saving.
 
 You need to place external converter (distance-sensor.js) into zigbee2mqtt.
 
+Built binaries are available in firmware directory.
+
 Attempts to bind right after power on.
 
 Pinout:
