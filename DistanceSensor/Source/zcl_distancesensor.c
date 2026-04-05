@@ -104,7 +104,7 @@
  * CONSTANTS
  */
 
-const uint32 distanceTimerMs = 60000;
+const uint32 initialReadingDelay = 100;
 
 /*********************************************************************
  * TYPEDEFS
@@ -117,6 +117,7 @@ byte zclDistanceSensor_TaskID;
 
 extern int16 zdpExternalStateTaskID;
 extern float zclDistanceSensor_MeasuredValue;
+extern application_config_t zclDistanceSensor_Config;
 
 /*********************************************************************
  * GLOBAL FUNCTIONS
@@ -130,12 +131,17 @@ extern float zclDistanceSensor_MeasuredValue;
 char uartBuffer[256];
 #endif
 
-uint8 SeqNum = 0;
-afAddrType_t report_DstAddr;
-
 
 #ifdef BDB_REPORTING
-float reportableDistanceChange = 0.0f;
+#if BDBREPORTING_MAX_ANALOG_ATTR_SIZE == 8
+  uint8 reportableDistanceChange[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+#endif
+#if BDBREPORTING_MAX_ANALOG_ATTR_SIZE == 4
+  uint8 reportableDistanceChange[] = {0x00, 0x00, 0x00, 0x00};
+#endif 
+#if BDBREPORTING_MAX_ANALOG_ATTR_SIZE == 2
+  uint8 reportableDistanceChange[] = {0x00, 0x00};
+#endif 
 #endif
   
 
@@ -144,6 +150,10 @@ float reportableDistanceChange = 0.0f;
  * LOCAL FUNCTIONS
  */
 static void zclDistanceSensor_BasicResetCB( void );
+static ZStatus_t zclDistanceSensor_ReadWriteAuthCB(afAddrType_t *srcAddr, zclAttrRec_t *pAttr, uint8 oper);
+
+static void zclDistanceSensor_RestoreAttributesFromNV(void);
+static void zclDistanceSensor_SaveAttributesToNV(void);
 
 static void zclDistanceSensor_ProcessCommissioningStatus(bdbCommissioningModeMsg_t* bdbCommissioningModeMsg);
 
@@ -177,7 +187,7 @@ static zclGeneral_AppCallbacks_t zclDistanceSensor_CmdCallbacks =
 {
   zclDistanceSensor_BasicResetCB,                 // Basic Cluster Reset command
   NULL,                                           // Identify Trigger Effect command
-  NULL,             				                      // On/Off cluster command
+  NULL,                                           // On/Off cluster command
   NULL,                                           // On/Off cluster enhanced command Off with Effect
   NULL,                                           // On/Off cluster enhanced command On with Recall Global Scene
   NULL,                                           // On/Off cluster enhanced command On with Timed Off
@@ -206,6 +216,37 @@ static zclGeneral_AppCallbacks_t zclDistanceSensor_CmdCallbacks =
   NULL                                            // RSSI Location Response command
 };
 
+static void zclDistanceSensor_SaveAttributesToNV(void)
+{
+  uint8 writeStatus = osal_nv_write(NW_APP_CONFIG, 0, sizeof(application_config_t), &zclDistanceSensor_Config);
+}
+
+static void zclDistanceSensor_RestoreAttributesFromNV(void)
+{
+  uint8 status = osal_nv_item_init(NW_APP_CONFIG, sizeof(application_config_t), NULL);
+  if (status == NV_ITEM_UNINIT) {
+      uint8 writeStatus = osal_nv_write(NW_APP_CONFIG, 0, sizeof(application_config_t), &zclDistanceSensor_Config);
+  }
+  if (status == ZSUCCESS) {
+      osal_nv_read(NW_APP_CONFIG, 0, sizeof(application_config_t), &zclDistanceSensor_Config);
+  }
+}
+
+static ZStatus_t zclDistanceSensor_ReadWriteAuthCB(afAddrType_t *srcAddr, zclAttrRec_t *pAttr, uint8 oper)
+{
+  // restart measurement timer
+  if (pAttr->attr.attrId == ATTRID_READING_INTERVAL)
+  {
+    osal_stop_timerEx(zclDistanceSensor_TaskID, VL53_MEASURE_EVT);
+    osal_start_timerEx(zclDistanceSensor_TaskID, VL53_MEASURE_EVT, initialReadingDelay);
+  }
+
+  osal_stop_timerEx(zclDistanceSensor_TaskID, APP_SAVE_CONFIG_EVT);
+  osal_start_timerEx(zclDistanceSensor_TaskID, APP_SAVE_CONFIG_EVT, 2000);
+  return ZSuccess;
+}
+
+
 /*********************************************************************
  * @fn          zclDistanceSensor_Init
  *
@@ -227,27 +268,32 @@ void zclDistanceSensor_Init( byte task_id )
 
   // Register the application's attribute list
   zclDistanceSensor_ResetAttributesToDefaultValues();
+  zclDistanceSensor_RestoreAttributesFromNV();
+
   zcl_registerAttrList( DISTANCE_SENSOR_ENDPOINT, zclDistanceSensor_NumAttributes, zclDistanceSensor_Attrs );   
+
+  zcl_registerReadWriteCB(DISTANCE_SENSOR_ENDPOINT, NULL, zclDistanceSensor_ReadWriteAuthCB);
 
   // Register the Application to receive the unprocessed Foundation command/response messages
   zcl_registerForMsg( zclDistanceSensor_TaskID );
 
-  bdb_StartCommissioning(BDB_COMMISSIONING_MODE_NWK_STEERING |
-                         BDB_COMMISSIONING_MODE_FINDING_BINDING);
-
-  bdb_RegisterCommissioningStatusCB( zclDistanceSensor_ProcessCommissioningStatus );
 
 #ifdef BDB_REPORTING
   //Adds the default configuration values for the "distance" attribute of the ZCL_CLUSTER_ID_GEN_ANALOG_INPUT_BASIC cluster, for endpoint DISTANCE_SENSOR_ENDPOINT
   //Default maxReportingInterval value is 3600 seconds
   //Default minReportingInterval value is 5 seconds
   //Default reportChange value is 300 (3 degrees)
-  bdb_RepAddAttrCfgRecordDefaultToList(DISTANCE_SENSOR_ENDPOINT, ZCL_CLUSTER_ID_GEN_ANALOG_INPUT_BASIC, ATTRID_IOV_BASIC_PRESENT_VALUE, 60, 3600, (uint8*)&reportableDistanceChange);
+  bdb_RepAddAttrCfgRecordDefaultToList(DISTANCE_SENSOR_ENDPOINT, ZCL_CLUSTER_ID_GEN_ANALOG_INPUT_BASIC, ATTRID_IOV_BASIC_PRESENT_VALUE, 10, 3600, (uint8*)&reportableDistanceChange);
 #endif
-    
+
+  bdb_StartCommissioning(BDB_COMMISSIONING_MODE_NWK_STEERING |
+                         BDB_COMMISSIONING_MODE_FINDING_BINDING);
+
+  bdb_RegisterCommissioningStatusCB( zclDistanceSensor_ProcessCommissioningStatus );
+
   zdpExternalStateTaskID = zclDistanceSensor_TaskID;
 
-  
+
 #ifdef UART_DEBUG
   initUART0();
   writeUART0("\n\n\n===================UART0 init===================\r\n");
@@ -259,7 +305,7 @@ void zclDistanceSensor_Init( byte task_id )
   // Measure distance right after init.
   osal_start_timerEx(zclDistanceSensor_TaskID,
                      VL53_MEASURE_EVT,
-                     100);
+                     initialReadingDelay);
 }
 
 void DistanceSensorInit(void)
@@ -350,12 +396,12 @@ uint16 zclDistanceSensor_event_loop( uint8 task_id, uint16 events )
     else
     {
       zclDistanceSensor_MeasuredValue = readDistance;
-      ReportDistance();
+      bdb_RepChangedAttrValue(DISTANCE_SENSOR_ENDPOINT, ZCL_CLUSTER_ID_GEN_ANALOG_INPUT_BASIC, ATTRID_IOV_BASIC_PRESENT_VALUE);
     }
 
     osal_start_timerEx(zclDistanceSensor_TaskID,
                        VL53_MEASURE_EVT,
-                       distanceTimerMs);    
+                       (zclDistanceSensor_Config.ReadingInterval == 0 ? DEFAULT_READING_INTERVAL : zclDistanceSensor_Config.ReadingInterval) * 1000);
 
     osal_pwrmgr_task_state(zclDistanceSensor_TaskID,
                            PWRMGR_CONSERVE);
@@ -365,6 +411,12 @@ uint16 zclDistanceSensor_event_loop( uint8 task_id, uint16 events )
 #endif
 
     return events ^ VL53_MEASURE_EVT;
+  }
+
+  if(events & APP_SAVE_CONFIG_EVT)
+  {
+    zclDistanceSensor_SaveAttributesToNV();
+    return events ^ APP_SAVE_CONFIG_EVT;
   }
 
   // Discard unknown events
@@ -401,11 +453,6 @@ static void zclDistanceSensor_ProcessCommissioningStatus(bdbCommissioningModeMsg
         {
           //YOUR JOB:
           //We are on the nwk, what now?
-          osal_stop_timerEx(zclDistanceSensor_TaskID, VL53_MEASURE_EVT);    
-
-          osal_start_timerEx(zclDistanceSensor_TaskID,
-                             VL53_MEASURE_EVT,
-                             5000);    
         }
         else
         {
@@ -463,7 +510,9 @@ static void zclDistanceSensor_ProcessCommissioningStatus(bdbCommissioningModeMsg
 static void zclDistanceSensor_BasicResetCB( void )
 {
   zclDistanceSensor_ResetAttributesToDefaultValues();
+  zclDistanceSensor_SaveAttributesToNV();
 }
+
 
 /******************************************************************************
  *
@@ -685,32 +734,3 @@ static uint8 zclDistanceSensor_ProcessInDiscAttrsExtRspCmd( zclIncomingMsg_t *pI
   return ( TRUE );
 }
 #endif // ZCL_DISCOVER
-
-
-/****************************************************************************
-****************************************************************************/
-
-void ReportDistance(void)
-{
-  const uint8 NUM_ATTRIBUTES = 1;
-
-  zclReportCmd_t *pReportCmd = osal_mem_alloc(sizeof(zclReportCmd_t) +
-                              (NUM_ATTRIBUTES * sizeof(zclReport_t)));
-  if (pReportCmd != NULL) {
-    pReportCmd->numAttr = NUM_ATTRIBUTES;
-
-    pReportCmd->attrList[0].attrID = ATTRID_IOV_BASIC_PRESENT_VALUE;
-    pReportCmd->attrList[0].dataType = ZCL_DATATYPE_SINGLE_PREC;
-    pReportCmd->attrList[0].attrData = (void *)(&zclDistanceSensor_MeasuredValue);
-
-    report_DstAddr.addrMode = (afAddrMode_t)Addr16Bit;
-    report_DstAddr.addr.shortAddr = 0;
-    report_DstAddr.endPoint = 1;
-
-    zcl_SendReportCmd(DISTANCE_SENSOR_ENDPOINT, &report_DstAddr,
-                      ZCL_CLUSTER_ID_GEN_ANALOG_INPUT_BASIC, pReportCmd,
-                      ZCL_FRAME_SERVER_CLIENT_DIR, false, SeqNum++);
-  }
-
-  osal_mem_free(pReportCmd);
-}

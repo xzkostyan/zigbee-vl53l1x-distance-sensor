@@ -54,15 +54,21 @@ extern "C"
 /*********************************************************************
  * CONSTANTS
  */
-#define DISTANCE_SENSOR_ENDPOINT            1
-  
+#define DISTANCE_SENSOR_ENDPOINT                1
+
+// Custom attribute for sensor reading interval
+#define ATTRID_READING_INTERVAL                 0x0201
+
 // Application Events
-#define END_DEVICE_REJOIN_EVT             0x0002  
+#define VL53_MEASURE_EVT                        0x0001
+#define APP_SAVE_CONFIG_EVT                     0x0002
+#define END_DEVICE_REJOIN_EVT                   0x0004
 
-#define END_DEVICE_REJOIN_DELAY         10000
+#define END_DEVICE_REJOIN_DELAY                 10000
    
-#define VL53_MEASURE_EVT                0x4000
+#define NW_APP_CONFIG                           0x0402
 
+#define DEFAULT_READING_INTERVAL                60 // in seconds
   
 /*********************************************************************
  * MACROS
@@ -70,6 +76,9 @@ extern "C"
 /*********************************************************************
  * TYPEDEFS
  */
+typedef struct {
+    uint16 ReadingInterval;
+} application_config_t;
 
 /*********************************************************************
  * VARIABLES
@@ -109,11 +118,6 @@ extern UINT16 zclDistanceSensor_event_loop( byte task_id, UINT16 events );
  */
 extern void zclDistanceSensor_ResetAttributesToDefaultValues(void);
 
-
-/*
- *  Reports distance to.
- */
-void ReportDistance(void);
 
 /*
  *  Initialize VL53L1X sensor.

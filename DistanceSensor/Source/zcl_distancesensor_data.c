@@ -57,7 +57,7 @@
  * CONSTANTS
  */
 
-#define DISTANCE_SENSOR_DEVICE_VERSION     0
+#define DISTANCE_SENSOR_DEVICE_VERSION     1
 #define DISTANCE_SENSOR_FLAGS              0
 
 #define DISTANCE_SENSOR_HWVERSION          1
@@ -88,9 +88,9 @@ const uint8 zclDistanceSensor_HWRevision = DISTANCE_SENSOR_HWVERSION;
 const uint8 zclDistanceSensor_ZCLVersion = DISTANCE_SENSOR_ZCLVERSION;
 const uint8 zclDistanceSensor_AppVersion = DISTANCE_SENSOR_APPVERSION;
 const uint8 zclDistanceSensor_StackVersion = DISTANCE_SENSOR_STACKVERSION;
-const uint8 zclDistanceSensor_ManufacturerName[] = { 16, 'x','z','k','o','s','t','y','a','n',' ',' ',' ',' ',' ',' ',' ' };
-const uint8 zclDistanceSensor_ModelId[] = { 16, 'd','i','s','t','a','n','c','e','-','s','e','n','s','o','r',' ' };
-const uint8 zclDistanceSensor_DateCode[] = { 16, '2','0','2','6','0','3','0','8',' ',' ',' ',' ',' ',' ',' ',' ' };
+const uint8 zclDistanceSensor_ManufacturerName[] = { 9, 'x','z','k','o','s','t','y','a','n' };
+const uint8 zclDistanceSensor_ModelId[] = { 15, 'd','i','s','t','a','n','c','e','-','s','e','n','s','o','r' };
+const uint8 zclDistanceSensor_DateCode[] = { 8, '2','0','2','6','0','3','0','8' };
 const uint8 zclDistanceSensor_PowerSource = POWER_SOURCE_DC;
 
 uint8 zclDistanceSensor_LocationDescription[17];
@@ -104,6 +104,10 @@ float zclDistanceSensor_MeasuredValue = 0;
 
 const float zclDistanceSensor_MinMeasuredValue = DISTANCE_MIN_MEASURED_VALUE; 
 const float zclDistanceSensor_MaxMeasuredValue = DISTANCE_MAX_MEASURED_VALUE;
+
+application_config_t zclDistanceSensor_Config = {
+    .ReadingInterval = DEFAULT_READING_INTERVAL
+};
 
 /*********************************************************************
  * ATTRIBUTE DEFINITIONS - Uses REAL cluster IDs
@@ -270,6 +274,15 @@ CONST zclAttrRec_t zclDistanceSensor_Attrs[] =
       (void *)&zclDistanceSensor_MaxMeasuredValue
     }
   },
+  {
+    ZCL_CLUSTER_ID_GEN_ANALOG_INPUT_BASIC,
+    { // Attribute record
+      ATTRID_READING_INTERVAL,
+      ZCL_DATATYPE_UINT16,
+      ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE | ACCESS_CONTROL_AUTH_WRITE,
+      (void *)&zclDistanceSensor_Config.ReadingInterval
+    }
+  },
 ////  
 };
 
@@ -336,4 +349,5 @@ void zclDistanceSensor_ResetAttributesToDefaultValues(void)
 #endif
   
   zclDistanceSensor_MeasuredValue = 0;
+  zclDistanceSensor_Config.ReadingInterval = DEFAULT_READING_INTERVAL;
 }
